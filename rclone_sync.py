@@ -37,7 +37,7 @@ except Exception:
 
 
 def log(message: str) -> None:
-    print(f"{datetime.now():%Y-%m-%d %H:%M:%S} - {message}")
+    print(f"{datetime.now():%Y-%m-%d %H:%M:%S} - {message}", flush=True)
 
 
 class TrayIcon:
@@ -157,33 +157,37 @@ class SyncController:
         if self.tray is not None:
             self.tray.set_state(state)
 
-    def sync_once(self) -> None:
+    def sync_once(self, origin: str = "automatic") -> None:
         if not self.sync_lock.acquire(blocking=False):
-            log("Sync already in progress; manual request ignored.")
+            log(f"Sync request ignored; another sync is already running (origin={origin}).")
             return
 
+        started_at = time.monotonic()
         self.set_state("syncing")
-        log("Starting bisync...")
+        log(f"Sync started (origin={origin}, local={LOCAL_DIR}, remote={REMOTE}).")
         try:
             completed = subprocess.run(
                 ["rclone", "bisync", LOCAL_DIR, REMOTE],
                 check=False,
             )
         except FileNotFoundError:
-            log("rclone not found in PATH.")
+            log(f"Sync failed after {time.monotonic() - started_at:.1f}s: rclone not found in PATH.")
             self.set_state("error")
         else:
+            duration = time.monotonic() - started_at
             if completed.returncode == 0:
-                log("Sync completed successfully!")
+                log(f"Sync completed successfully in {duration:.1f}s (origin={origin}).")
                 self.set_state("idle")
             else:
-                log("Sync failed! Check logs.")
+                log(f"Sync failed with exit code {completed.returncode} after {duration:.1f}s (origin={origin}).")
                 self.set_state("error")
         finally:
             self.sync_lock.release()
+            log(f"Sync finished (origin={origin}).")
 
     def request_sync(self) -> None:
-        sync_thread = threading.Thread(target=self.sync_once, daemon=True)
+        log("Manual sync requested from tray menu.")
+        sync_thread = threading.Thread(target=self.sync_once, args=("manual",), daemon=True)
         sync_thread.start()
 
     def view_logs(self) -> None:
@@ -207,8 +211,13 @@ class SyncController:
     def schedule_sync(self) -> None:
         if self.sync_timer is not None:
             self.sync_timer.cancel()
+            log("Pending automatic sync rescheduled after another file event.")
 
-        self.sync_timer = threading.Timer(CHECK_DELAY, self.sync_once)
+        log(f"Automatic sync scheduled in {CHECK_DELAY}s.")
+        self.sync_timer = threading.Timer(
+            CHECK_DELAY,
+            lambda: self.sync_once("file change"),
+        )
         self.sync_timer.daemon = True
         self.sync_timer.start()
 
@@ -226,8 +235,10 @@ class SyncController:
         if not full_path or not event_name:
             return
         if not re.search(r"\.rnote$", full_path, flags=re.IGNORECASE):
+            log(f"Ignoring non-.rnote event: {full_path} ({event_name}).")
             return
         if event_name not in {"CREATE", "DELETE", "MOVE", "MODIFY", "CLOSE_WRITE", "ATTRIB"}:
+            log(f"Ignoring unsupported event: {full_path} ({event_name}).")
             return
 
         now = time.time()
@@ -260,6 +271,8 @@ class SyncController:
             log("inotifywait is not installed or not in PATH.")
             return
 
+        log(f"Filesystem watcher active for {LOCAL_DIR} (events={WATCH_EVENTS}).")
+
         if self.inotify_proc.stdout is None:
             return
 
@@ -269,11 +282,15 @@ class SyncController:
             self.handle_inotify_line(raw_line)
 
     def stop(self) -> None:
+        if not self.running:
+            return
         self.running = False
         if self.sync_timer is not None:
             self.sync_timer.cancel()
+            log("Pending automatic sync cancelled.")
         if self.inotify_proc is not None and self.inotify_proc.poll() is None:
             self.inotify_proc.terminate()
+            log("Filesystem watcher stopped.")
         self.set_state("stopped")
 
 
@@ -307,8 +324,8 @@ def main() -> int:
     watcher = threading.Thread(target=controller.watch_directory, daemon=True)
     watcher.start()
 
-    log("Starting initial sync...")
-    initial_sync = threading.Thread(target=controller.sync_once, daemon=True)
+    log("Initial sync queued.")
+    initial_sync = threading.Thread(target=controller.sync_once, args=("initial",), daemon=True)
     initial_sync.start()
 
     try:
