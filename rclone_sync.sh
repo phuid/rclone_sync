@@ -14,11 +14,26 @@ log() {
 	echo "$(date '+%Y-%m-%d %H:%M:%S') - $1"
 }
 
+sync() {
+	notify "Starting bisync..."
+	log "Starting bisync..."
+	if rclone bisync "$LOCAL_DIR" "$REMOTE"; then
+		notify "Sync completed successfully!"
+		log "Sync completed successfully!"
+	else
+		notify "Sync failed! Check logs."
+		log "Sync failed! Check logs."
+	fi
+}
+
+sync	# Initial sync on script start
+
 notify "Watcher started for $LOCAL_DIR"
 
 # Watch for events: modify, create, delete, move
 inotifywait -m -r -e modify,create,delete,move "$LOCAL_DIR" |
 	while read path action file; do
+		log "Detected $action on $file in $path, $read"
 		if [[ "$file" =~ \.rnote$ ]]; then
 			echo "Change detected in $file via $action. Waiting $CHECK_DELAY seconds..."
 			log "Change detected in $file via $action. Waiting $CHECK_DELAY seconds..."
@@ -27,15 +42,8 @@ inotifywait -m -r -e modify,create,delete,move "$LOCAL_DIR" |
 			# you save a large batch of files at once.
 			sleep $CHECK_DELAY
 
-			notify "Starting bisync..."
-			log "Starting bisync..."
-			if rclone bisync "$LOCAL_DIR" "$REMOTE"; then
-				notify "Sync completed successfully!"
-				log "Sync completed successfully!"
-			else
-				notify "Sync failed! Check logs."
-				log "Sync failed! Check logs."
-			fi
+			sync
+
 		else
 			echo "Change detected in $file via $action, but it does not match the .rnote pattern. Ignoring."
 			log "Change detected in $file via $action, but it does not match the .rnote pattern. Ignoring."

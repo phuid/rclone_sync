@@ -58,7 +58,7 @@ directory itself or only its contents.
 
 ## Start automatically with systemd
 
-Create a user service at `~/.config/systemd/user/watch-sync.service`:
+Create a user service at `~/.config/systemd/user/rclone_sync.service`:
 
 ```ini
 [Unit]
@@ -79,14 +79,14 @@ Enable and start it:
 
 ```sh
 systemctl --user daemon-reload
-systemctl --user enable --now watch-sync.service
+systemctl --user enable --now rclone_sync.service
 ```
 
 View logs and status with:
 
 ```sh
-systemctl --user status watch-sync.service
-journalctl --user -u watch-sync.service -f
+systemctl --user status rclone_sync.service
+journalctl --user -u rclone_sync.service -f
 ```
 
 To keep the service running after logout, enable lingering for your user:
