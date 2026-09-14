@@ -33,7 +33,6 @@ notify "Watcher started for $LOCAL_DIR"
 # Watch for events: modify, create, delete, move
 inotifywait -m -r -e modify,create,delete,move "$LOCAL_DIR" |
 	while read path action file; do
-		log "Detected $action on $file in $path, $read"
 		if [[ "$file" =~ \.rnote$ ]]; then
 			echo "Change detected in $file via $action. Waiting $CHECK_DELAY seconds..."
 			log "Change detected in $file via $action. Waiting $CHECK_DELAY seconds..."
