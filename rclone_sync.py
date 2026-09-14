@@ -4,6 +4,7 @@ import argparse
 import os
 import re
 import signal
+import shutil
 import subprocess
 import sys
 import threading
@@ -40,7 +41,7 @@ def log(message: str) -> None:
 
 
 class TrayIcon:
-    def __init__(self):
+    def __init__(self, on_sync, on_logs):
         self.icon = None
         self.indicator = None
         self.enabled = False
@@ -58,6 +59,7 @@ class TrayIcon:
                 )
                 self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
                 self.indicator.set_attention_icon("dialog-error")
+                self.indicator.set_menu(self.create_menu(on_sync, on_logs))
                 self.enabled = True
                 self.set_state("idle")
                 return
@@ -65,6 +67,7 @@ class TrayIcon:
             self.icon = Gtk.StatusIcon()
             self.icon.set_title("Rclone Sync")
             self.icon.set_visible(True)
+            self.icon.connect("popup-menu", self.show_menu, on_sync, on_logs)
             self.set_state("idle")
             self.enabled = True
         except Exception as exc:
@@ -72,6 +75,28 @@ class TrayIcon:
             self.icon = None
             self.indicator = None
             self.enabled = False
+
+    def create_menu(self, on_sync, on_logs):
+        menu = Gtk.Menu()
+
+        sync_item = Gtk.MenuItem(label="Sync now")
+        sync_item.connect("activate", lambda _item: on_sync())
+        menu.append(sync_item)
+
+        logs_item = Gtk.MenuItem(label="View logs")
+        logs_item.connect("activate", lambda _item: on_logs())
+        menu.append(logs_item)
+
+        menu.append(Gtk.SeparatorMenuItem())
+        quit_item = Gtk.MenuItem(label="Quit")
+        quit_item.connect("activate", lambda _item: self.quit())
+        menu.append(quit_item)
+        menu.show_all()
+        return menu
+
+    def show_menu(self, _icon, button, activate_time, on_sync, on_logs):
+        menu = self.create_menu(on_sync, on_logs)
+        menu.popup(None, None, Gtk.StatusIcon.position_menu, self.icon, button, activate_time)
 
     def set_state(self, state: str) -> None:
         icon_names = {
@@ -122,6 +147,7 @@ class TrayIcon:
 class SyncController:
     def __init__(self, tray: TrayIcon):
         self.tray = tray
+        self.sync_lock = threading.Lock()
         self.running = True
         self.sync_timer = None
         self.inotify_proc = None
@@ -132,6 +158,10 @@ class SyncController:
             self.tray.set_state(state)
 
     def sync_once(self) -> None:
+        if not self.sync_lock.acquire(blocking=False):
+            log("Sync already in progress; manual request ignored.")
+            return
+
         self.set_state("syncing")
         log("Starting bisync...")
         try:
@@ -142,14 +172,37 @@ class SyncController:
         except FileNotFoundError:
             log("rclone not found in PATH.")
             self.set_state("error")
-            return
-
-        if completed.returncode == 0:
-            log("Sync completed successfully!")
-            self.set_state("idle")
         else:
-            log("Sync failed! Check logs.")
-            self.set_state("error")
+            if completed.returncode == 0:
+                log("Sync completed successfully!")
+                self.set_state("idle")
+            else:
+                log("Sync failed! Check logs.")
+                self.set_state("error")
+        finally:
+            self.sync_lock.release()
+
+    def request_sync(self) -> None:
+        sync_thread = threading.Thread(target=self.sync_once, daemon=True)
+        sync_thread.start()
+
+    def view_logs(self) -> None:
+        journal_args = ["journalctl", "--user", "-u", "rclone_sync.service", "-f"]
+        terminal_commands = [
+            ["x-terminal-emulator", "-e", *journal_args],
+            ["gnome-terminal", "--", *journal_args],
+            ["konsole", "-e", *journal_args],
+            ["xfce4-terminal", "-e", " ".join(journal_args)],
+        ]
+
+        for command in terminal_commands:
+            if shutil.which(command[0]):
+                try:
+                    subprocess.Popen(command)
+                    return
+                except OSError:
+                    continue
+        log("Could not find a terminal emulator to open journalctl.")
 
     def schedule_sync(self) -> None:
         if self.sync_timer is not None:
@@ -243,11 +296,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    tray = None if args.no_tray else TrayIcon()
+    controller = SyncController(None)
+    tray = None if args.no_tray else TrayIcon(controller.request_sync, controller.view_logs)
     if tray is not None and not tray.enabled:
         tray = None
-
-    controller = SyncController(tray)
+    controller.tray = tray
     install_signal_handlers(controller, tray)
 
     log(f"Watcher started for {LOCAL_DIR}")

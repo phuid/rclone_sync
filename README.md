@@ -1,60 +1,48 @@
-# watch_sync.sh
+# rclone sync watcher
 
-`watch_sync.sh` watches a local directory and synchronizes changes to a remote
-directory with `rsync`.
-
-*readme fully AI generated*
+`rclone_sync.py` watches `/home/phuid/Documents` for `.rnote` changes and
+synchronizes them with `gdrive_vut:/Documents/` using `rclone bisync`.
 
 ## Requirements
 
 - Linux with `inotifywait` (`inotify-tools` package)
-- `rsync`
-- SSH access to the destination host
+- Python 3
+- `rclone` configured with the `gdrive_vut` remote
+- GTK 3 Python bindings for the optional tray icon
 
 Install the tools on Debian or Ubuntu:
 
 ```sh
-sudo apt install inotify-tools rsync openssh-client
+sudo apt install inotify-tools python3-gi
+```
+
+The tray icon uses AppIndicator when available. On desktops that provide it,
+install the optional indicator bindings too:
+
+```sh
+sudo apt install gir1.2-appindicator3-0.1
 ```
 
 ## Basic usage
 
-Make the script executable and run it with the source and destination paths:
+Run the watcher from a graphical terminal:
 
 ```sh
-chmod +x ./watch_sync.sh
-./watch_sync.sh /path/to/local/dir user@server:/path/to/remote/dir
+cd /path/to/rclone_sync
+/usr/bin/python3 ./rclone_sync.py
 ```
 
-If the script uses configuration variables instead of arguments, edit the
-values at the top of `watch_sync.sh` before starting it.
+The tray menu provides:
 
-## Tutorial: add an rsync remote
+- **Sync now** to start a manual `rclone bisync`
+- **View logs** to open `journalctl --user -u rclone_sync.service -f`
+- **Quit** to stop the watcher
 
-1. Create an SSH key if needed:
+Use `--no-tray` when running without a graphical session:
 
-	```sh
-	ssh-keygen -t ed25519
-	```
-
-2. Install the key on the remote server:
-
-	```sh
-	ssh-copy-id user@server
-	```
-
-3. Test SSH and rsync:
-
-	```sh
-	ssh user@server
-	rsync -av --dry-run ./local-dir/ user@server:/path/to/remote-dir/
-	```
-
-4. Use the same `user@server:/path/to/remote-dir` destination when starting
-	`watch_sync.sh`.
-
-The trailing slash on a source directory controls whether rsync copies the
-directory itself or only its contents.
+```sh
+/usr/bin/python3 ./rclone_sync.py --no-tray
+```
 
 ## Start automatically with systemd
 
@@ -68,7 +56,7 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/path/to/project
-ExecStart=/path/to/project/watch_sync.sh /path/to/local/dir user@server:/path/to/remote/dir
+ExecStart=/usr/bin/python3 /path/to/rclone_sync/rclone_sync.py
 Restart=on-failure
 
 [Install]
@@ -82,7 +70,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now rclone_sync.service
 ```
 
-View logs and status with:
+View logs and status with the tray menu or:
 
 ```sh
 systemctl --user status rclone_sync.service
