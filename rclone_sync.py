@@ -20,7 +20,7 @@ WATCH_EVENTS = "close_write,create,delete,move,modify,attrib"
 try:
     import gi
     gi.require_version("Gtk", "3.0")
-    from gi.repository import Gtk
+    from gi.repository import Gtk, GLib
     gi.require_version("AppIndicator3", "0.1")
     from gi.repository import AppIndicator3
     AppIndicator3_available = True
@@ -32,6 +32,7 @@ except Exception:
         from gi.repository import Gtk
     except Exception:
         Gtk = None
+        GLib = None
     else:
         AppIndicator3 = None
 
@@ -64,6 +65,7 @@ class TrayIcon:
                 self.set_state("idle")
                 return
 
+            log("AppIndicator3 is unavailable; using legacy Gtk.StatusIcon fallback.")
             self.icon = Gtk.StatusIcon()
             self.icon.set_title("Rclone Sync")
             self.icon.set_visible(True)
@@ -99,6 +101,10 @@ class TrayIcon:
         menu.popup(None, None, Gtk.StatusIcon.position_menu, self.icon, button, activate_time)
 
     def set_state(self, state: str) -> None:
+        if GLib is not None and threading.current_thread() is not threading.main_thread():
+            GLib.idle_add(self.set_state, state)
+            return
+
         icon_names = {
             "idle": "emblem-default",
             "syncing": "view-refresh",

@@ -23,6 +23,10 @@ install the optional indicator bindings too:
 sudo apt install gir1.2-appindicator3-0.1
 ```
 
+On Ubuntu GNOME, also enable an AppIndicator extension if the icon is not
+visible in the panel. The service waits for `graphical-session.target` and
+uses the current X11 display (`DISPLAY=:0`) when started by user systemd.
+
 ## Basic usage
 
 Run the watcher from a graphical terminal:
@@ -56,8 +60,12 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/path/to/project
+# Replace these with the values from your graphical session if needed.
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/run/user/%U/gdm/Xauthority
 ExecStart=/usr/bin/python3 /path/to/rclone_sync/rclone_sync.py
 Restart=on-failure
+RestartSec=5
 
 [Install]
 WantedBy=default.target
